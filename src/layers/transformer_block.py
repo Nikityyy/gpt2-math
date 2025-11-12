@@ -3,9 +3,9 @@ from .feed_forward import init_feed_forward, feed_forward
 from src.utils.layer_norm import init_layer_norm, layer_norm
 from src.utils.add_matrices import add_matrices
 
-def init_transformer_block(d_model, num_heads, d_ff):
-    mha_weights = init_multi_head_attention(d_model, num_heads)
-    ffn_weights = init_feed_forward(d_model, d_ff)
+def init_transformer_block(d_model, num_heads, d_ff, num_layers=None):
+    mha_weights = init_multi_head_attention(d_model, num_heads, num_layers=num_layers)
+    ffn_weights = init_feed_forward(d_model, d_ff, num_layers=num_layers)
     ln1_weights = init_layer_norm(d_model)
     ln2_weights = init_layer_norm(d_model)
     return [mha_weights, ffn_weights, ln1_weights, ln2_weights]

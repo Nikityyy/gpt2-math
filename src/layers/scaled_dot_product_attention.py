@@ -4,23 +4,15 @@ from src.utils.transpose_matrix import transpose_matrix
 from src.utils.masked_softmax import masked_softmax
 from src.utils.softmax import softmax
 
-def _scale_tensor(tensor, scale_factor):
-    if isinstance(tensor, list):
-        return [_scale_tensor(item, scale_factor) for item in tensor]
-    else:
-        return tensor / scale_factor
-
 def scaled_dot_product_attention(queries, keys, values, mask=None):
-    if keys and isinstance(keys[0], list) and isinstance(keys[0][0], list):
-        dk = len(keys[0][0])
-    elif keys and isinstance(keys[0], list):
-        dk = len(keys[0])
-    else:
-        raise ValueError("Invalid shape for keys in scaled_dot_product_attention")
+    if not keys or not keys[0] or not keys[0][0]:
+         raise ValueError("Invalid shape for keys in scaled_dot_product_attention")
+    dk = len(keys[0][0])
 
     scores = matmul(queries, transpose_matrix(keys))
     # Scale scores
-    scaled_scores = _scale_tensor(scores, math.sqrt(dk))
+    scale_factor = math.sqrt(dk)
+    scaled_scores = [[[score / scale_factor for score in row] for row in matrix] for matrix in scores]
     
     if mask is not None:
         attention_weights = masked_softmax(scaled_scores, mask)

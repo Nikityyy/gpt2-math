@@ -90,20 +90,6 @@ def compare_token_embeddings_lookup(emb, batch_token_ids):
     assert np.array_equal(result1, result2), "The results of the two token_embeddings_lookup implementations do not match."
     print("Token embeddings lookup results match!")
 
-def compare_positional_encoding(seq_len, embedding_dim):
-    result1 = embeddings.positional_encoding.sinusoidal_positional_encoding(seq_len, embedding_dim)
-    result1 = np.array(result1)
-
-    position = torch.arange(seq_len, dtype=torch.float32).unsqueeze(1)
-    div_term = torch.exp(torch.arange(0, embedding_dim, 2).float() * (-np.log(10000.0) / embedding_dim))
-    pe = torch.zeros(seq_len, embedding_dim)
-    pe[:, 0::2] = torch.sin(position * div_term)
-    pe[:, 1::2] = torch.cos(position * div_term)
-    result2 = pe.numpy()
-
-    assert np.allclose(result1, result2), "The results of the two positional_encoding implementations do not match."
-    print("Positional encoding results match!")
-
 def compare_embeddings_layer(token_embeddings, positional_encodings):
     result1 = embeddings.embeddings_layer.embeddings_layer(token_embeddings, positional_encodings)
     result1 = np.array(result1)
@@ -431,7 +417,7 @@ if __name__ == "__main__":
     
     token_embeddings_val = embeddings.token_embeddings.token_embeddings_lookup(emb, batch_token_ids)
     
-    positional_encodings = embeddings.positional_encoding.sinusoidal_positional_encoding(max_seq_len, embedding_dim)
+    positional_encodings = embeddings.token_embeddings.init_random_embeddings(max_seq_len, embedding_dim)
     
     attention_mask = [[True] * (i + 1) + [False] * (sequence_length - 1 - i) for i in range(sequence_length)]
 
@@ -457,7 +443,6 @@ if __name__ == "__main__":
 
     print("\n--- Testing Embeddings ---")
     compare_token_embeddings_lookup(emb, batch_token_ids)
-    compare_positional_encoding(sequence_length, embedding_dim)
     compare_embeddings_layer(token_embeddings_val, positional_encodings)
     
     print("\n--- Testing Layers ---")

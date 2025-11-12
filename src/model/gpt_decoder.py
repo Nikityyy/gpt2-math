@@ -3,7 +3,7 @@ from src.layers.transformer_block import init_transformer_block, transformer_blo
 
 def init_gpt_decoder(num_layers, d_model, num_heads, d_ff):
     block_weights = [
-        init_transformer_block(d_model, num_heads, d_ff) for _ in range(num_layers)
+        init_transformer_block(d_model, num_heads, d_ff, num_layers=num_layers) for _ in range(num_layers)
     ]
     return block_weights
 

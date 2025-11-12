@@ -3,7 +3,7 @@ from .scaled_dot_product_attention import scaled_dot_product_attention
 from src.utils.matrix_multiply import matmul
 from .linear_layer import linear_layer
 
-def init_multi_head_attention(d_model, num_heads):
+def init_multi_head_attention(d_model, num_heads, num_layers=None):
     if d_model % num_heads != 0:
         raise ValueError("d_model must be divisible by num_heads")
     
@@ -17,8 +17,7 @@ def init_multi_head_attention(d_model, num_heads):
         Wv, bv = init_random_linear(d_model, d_head)
         qkv_weights.append(((Wq, bq), (Wk, bk), (Wv, bv)))
         
-    # Output linear layer weights
-    Wo, bo = init_random_linear(d_model, d_model)
+    Wo, bo = init_random_linear(d_model, d_model, num_layers=num_layers)
     
     return [qkv_weights, (Wo, bo), d_model, num_heads, d_head]
 
@@ -40,15 +39,17 @@ def multi_head_attention(x, weights, mask=None):
         # Scaled dot-product attention
         head_output = scaled_dot_product_attention(Q, K, V, mask)
         all_head_outputs.append(head_output)
-
+        
     # Concatenate all head outputs
-    concatenated_output = [
-        [
-            sum((all_head_outputs[h][b][t] for h in range(num_heads)), [])
-            for t in range(seq_len)
+    concatenated_output = []
+    for b in range(batch_size):
+        sequences_for_batch_b = [head[b] for head in all_head_outputs]
+        zipped_tokens = zip(*sequences_for_batch_b)
+        concatenated_sequence = [
+            [item for head_vec in token_tuple for item in head_vec]
+            for token_tuple in zipped_tokens
         ]
-        for b in range(batch_size)
-    ]
+        concatenated_output.append(concatenated_sequence)
 
     # Final linear layer
     output = linear_layer(concatenated_output, Wo, bo)
