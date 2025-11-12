@@ -20,7 +20,7 @@ def init_multi_head_attention(d_model, num_heads):
     # Output linear layer weights
     Wo, bo = init_random_linear(d_model, d_model)
     
-    return qkv_weights, (Wo, bo), d_model, num_heads, d_head
+    return [qkv_weights, (Wo, bo), d_model, num_heads, d_head]
 
 def multi_head_attention(x, weights, mask=None):
     # Perform multi-head attention

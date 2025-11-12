@@ -8,7 +8,7 @@ def init_transformer_block(d_model, num_heads, d_ff):
     ffn_weights = init_feed_forward(d_model, d_ff)
     ln1_weights = init_layer_norm(d_model)
     ln2_weights = init_layer_norm(d_model)
-    return mha_weights, ffn_weights, ln1_weights, ln2_weights
+    return [mha_weights, ffn_weights, ln1_weights, ln2_weights]
 
 def transformer_block(x, weights, mask=None):
     mha_weights, ffn_weights, ln1_weights, ln2_weights = weights
