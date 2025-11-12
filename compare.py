@@ -369,17 +369,18 @@ def compare_gpt_decoder(x, weights, mask=None):
     print("GPT decoder results match!")
 
 def compare_output_projection(x, token_embedding_matrix):
-    result1 = model.output_projection.output_projection(x, token_embedding_matrix)
+    projection_weight = utils.transpose_matrix.transpose_matrix(token_embedding_matrix)
+    
+    result1 = model.output_projection.output_projection(x, projection_weight)
     result1 = np.array(result1)
 
     x_t = torch.tensor(x, dtype=torch.float32)
-    embedding_matrix_t = torch.tensor(token_embedding_matrix, dtype=torch.float32)
-
-    vocab_size, d_model = embedding_matrix_t.shape
+    vocab_size = len(token_embedding_matrix)
+    d_model = len(token_embedding_matrix[0]) if vocab_size > 0 else 0
 
     torch_linear_projection = torch.nn.Linear(d_model, vocab_size, bias=False)
     
-    torch_linear_projection.weight.data = embedding_matrix_t
+    torch_linear_projection.weight.data = torch.tensor(token_embedding_matrix, dtype=torch.float32)
     
     result2_t = torch_linear_projection(x_t)
     result2 = result2_t.detach().numpy()
@@ -399,7 +400,9 @@ def compare_gpt_model_forward(batch_token_ids, weights, mask=None):
     decoder_weights = weights["decoder"]
     decoder_output = model.gpt_decoder.gpt_decoder(x, decoder_weights, mask)
 
-    logits = model.output_projection.output_projection(decoder_output, token_embeds_matrix)
+    projection_weight = utils.transpose_matrix.transpose_matrix(token_embeds_matrix)
+    logits = model.output_projection.output_projection(decoder_output, projection_weight)
+    
     result2 = np.array(logits)
 
     assert np.allclose(result1, result2), "The results of the gpt_model_forward pass do not match the component-wise pass."

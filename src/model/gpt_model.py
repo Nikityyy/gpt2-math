@@ -2,6 +2,7 @@
 import random
 import src.embeddings as embeddings
 from src.utils.softmax import softmax
+from src.utils.transpose_matrix import transpose_matrix
 from .gpt_decoder import gpt_decoder, init_gpt_decoder
 from .output_projection import output_projection
 
@@ -23,7 +24,8 @@ def gpt_model_forward(batch_token_ids, weights, mask=None):
     decoder_weights = weights["decoder"]
     decoder_output = gpt_decoder(x, decoder_weights, mask)
 
-    logits = output_projection(decoder_output, token_embedding_matrix)
+    projection_weight = transpose_matrix(token_embedding_matrix)
+    logits = output_projection(decoder_output, projection_weight)
     
     return logits
 
