@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import src.utils as utils
 
 def compare_matmul(matrix1, matrix2):
@@ -25,6 +26,14 @@ def compare_transpose_matrix(matrix):
     assert np.array_equal(result1, result2), "The results of the two transpose implementations do not match."
     print("Transpose matrix results match!")
 
+def compare_softmax(vector):
+    result1 = utils.softmax.softmax(vector)
+    result1 = np.array(result1)
+    result2 = torch.nn.functional.softmax(torch.tensor(vector), dim=0).numpy()
+    
+    assert np.allclose(result1, result2), "The results of the two softmax implementations do not match."
+    print("Softmax results match!")
+
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
             [4, 5, 6]]
@@ -39,6 +48,9 @@ if __name__ == "__main__":
     mat4 = [[7, 8, 9],
             [10, 11, 12]]
     
+    vec1 = [1.0, 2.0, 3.0, 4.0]
+    
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat3, mat4)
     compare_transpose_matrix(mat1)
+    compare_softmax(vec1)
