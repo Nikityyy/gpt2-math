@@ -365,6 +365,25 @@ def compare_gpt_decoder(x, weights, mask=None):
     assert np.allclose(result1, result2), "The results of the gpt_decoder implementations do not match."
     print("GPT decoder results match!")
 
+def compare_output_projection(x, token_embedding_matrix):
+    result1 = model.output_projection.output_projection(x, token_embedding_matrix)
+    result1 = np.array(result1)
+
+    x_t = torch.tensor(x, dtype=torch.float32)
+    embedding_matrix_t = torch.tensor(token_embedding_matrix, dtype=torch.float32)
+
+    vocab_size, d_model = embedding_matrix_t.shape
+
+    torch_linear_projection = torch.nn.Linear(d_model, vocab_size, bias=False)
+    
+    torch_linear_projection.weight.data = embedding_matrix_t
+    
+    result2_t = torch_linear_projection(x_t)
+    result2 = result2_t.detach().numpy()
+
+    assert np.allclose(result1, result2), "The results of the output_projection implementations do not match."
+    print("Output projection results match!")
+
 if __name__ == "__main__":
     vocab_size = 10
     batch_size = 2
@@ -426,4 +445,9 @@ if __name__ == "__main__":
     compare_transformer_block(token_embeddings_val, block_weights_for_test, mask=attention_mask)
 
     print("\n--- Testing GPT Decoder ---")
+    decoder_output = model.gpt_decoder.gpt_decoder(embeddings_output, decoder_weights_for_test, mask=attention_mask)
     compare_gpt_decoder(embeddings_output, decoder_weights_for_test, mask=attention_mask)
+
+    print("\n--- Testing Output Projection ---")
+    token_embedding_matrix = [emb[i] for i in range(vocab_size)]
+    compare_output_projection(decoder_output, token_embedding_matrix)
