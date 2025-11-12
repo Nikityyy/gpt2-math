@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import src.utils as utils
+import src.embeddings as embeddings
 
 def compare_matmul(matrix1, matrix2):
     result1 = utils.matrix_multiply.matmul(matrix1, matrix2)
@@ -55,6 +56,16 @@ def compare_layer_norm(vector):
     assert np.allclose(result1, result2), "The results of the two layer_norm implementations do not match."
     print("Layer norm results match!")
 
+def compare_token_embeddings_lookup(emb, batch_token_ids):
+    result1 = embeddings.token_embeddings.token_embeddings_lookup(emb, batch_token_ids)
+    result1 = np.array(result1)
+ 
+    embedding_matrix = np.array([emb[i] for i in range(len(emb))])
+    result2 = np.array([[embedding_matrix[token_id] for token_id in seq] for seq in batch_token_ids])
+    
+    assert np.array_equal(result1, result2), "The results of the two token_embeddings_lookup implementations do not match."
+    print("Token embeddings lookup results match!")
+
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
             [4, 5, 6]]
@@ -73,9 +84,15 @@ if __name__ == "__main__":
     
     mask = [1, 0, 1, 1]
     
+    vocab_size = 10
+    embedding_dim = 5
+    emb = embeddings.token_embeddings.init_random_embeddings(vocab_size, embedding_dim)
+    batch_token_ids = [[0, 1, 2], [3, 4, 5]]
+    
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat3, mat4)
     compare_transpose_matrix(mat1)
     compare_softmax(vec1)
     compare_masked_softmax(vec1, mask)
     compare_layer_norm(vec1)
+    compare_token_embeddings_lookup(emb, batch_token_ids)
