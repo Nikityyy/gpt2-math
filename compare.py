@@ -80,6 +80,20 @@ def compare_positional_encoding(seq_len, embedding_dim):
     assert np.allclose(result1, result2), "The results of the two positional_encoding implementations do not match."
     print("Positional encoding results match!")
 
+def compare_embeddings_layer(token_embeddings, positional_encodings):
+    result1 = embeddings.embeddings_layer.embeddings_layer(token_embeddings, positional_encodings)
+    result1 = np.array(result1)
+    
+    token_embeddings_t = torch.tensor(token_embeddings, dtype=torch.float32)
+    positional_encodings_t = torch.tensor(positional_encodings, dtype=torch.float32)
+    seq_len = token_embeddings_t.size(1)
+    pos_sliced_t = positional_encodings_t[:seq_len, :].unsqueeze(0).expand(token_embeddings_t.size(0), -1, -1)
+    result2 = token_embeddings_t + pos_sliced_t
+    
+    assert result1.shape == result2.shape, f"Shape mismatch: {result1.shape} vs {result2.shape}"
+    assert np.allclose(result1, result2.numpy(), atol=1e-6), "The results of the two embeddings_layer implementations do not match."
+    
+    print("Embeddings layer results match!")
 
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
@@ -105,6 +119,9 @@ if __name__ == "__main__":
     emb = embeddings.token_embeddings.init_random_embeddings(vocab_size, embedding_dim)
     batch_token_ids = [[0, 1, 2], [3, 4, 5]]
     
+    token_embeddings = embeddings.token_embeddings.token_embeddings_lookup(emb, batch_token_ids)
+    positional_encodings = embeddings.positional_encoding.sinusoidal_positional_encoding(sequence_length, embedding_dim)
+
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat3, mat4)
     compare_transpose_matrix(mat1)
@@ -113,3 +130,4 @@ if __name__ == "__main__":
     compare_layer_norm(vec1)
     compare_token_embeddings_lookup(emb, batch_token_ids)
     compare_positional_encoding(sequence_length, embedding_dim)
+    compare_embeddings_layer(token_embeddings, positional_encodings)
