@@ -34,6 +34,17 @@ def compare_softmax(vector):
     assert np.allclose(result1, result2), "The results of the two softmax implementations do not match."
     print("Softmax results match!")
 
+def compare_masked_softmax(vector, mask):
+    result1 = utils.masked_softmax.masked_softmax(vector, mask)
+    result1 = np.array(result1)
+    
+    masked_vector = [v if m else float('-inf') for v, m in zip(vector, mask)]
+    tensor_vector = torch.tensor(masked_vector)
+    result2 = torch.nn.functional.softmax(tensor_vector, dim=0).numpy()
+    
+    assert np.allclose(result1, result2), "The results of the two masked_softmax implementations do not match."
+    print("Masked softmax results match!")
+
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
             [4, 5, 6]]
@@ -50,7 +61,10 @@ if __name__ == "__main__":
     
     vec1 = [1.0, 2.0, 3.0, 4.0]
     
+    mask = [1, 0, 1, 1]
+    
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat3, mat4)
     compare_transpose_matrix(mat1)
     compare_softmax(vec1)
+    compare_masked_softmax(vec1, mask)
