@@ -1,6 +1,4 @@
-from .linear_layer import init_random_linear
-from src.utils.matrix_multiply import matmul
-from src.utils.add_matrices import add_matrices
+from .linear_layer import init_random_linear, linear_layer
 from src.utils.gelu import gelu
 
 def init_feed_forward(d_model, d_ff):
@@ -12,14 +10,12 @@ def feed_forward(x, weights):
     (W1, b1), (W2, b2) = weights
     
     # First linear transformation
-    hidden = matmul(x, W1)
-    hidden_with_bias = add_matrices(hidden, b1)
+    hidden = linear_layer(x, W1, b1)
     
     # GELU activation
-    activated = gelu(hidden_with_bias)
+    activated = gelu(hidden)
     
     # Second linear transformation
-    output = matmul(activated, W2)
-    output_with_bias = add_matrices(output, b2)
+    output = linear_layer(activated, W2, b2)
     
-    return output_with_bias
+    return output

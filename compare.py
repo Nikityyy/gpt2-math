@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import torch
 import src.utils as utils
@@ -23,7 +24,12 @@ def compare_add_matrices(matrix1, matrix2):
 def compare_transpose_matrix(matrix):
     result1 = utils.transpose_matrix.transpose_matrix(matrix)
     result1 = np.array(result1)
-    result2 = np.transpose(matrix)
+    
+    input_arr = np.array(matrix)
+    if input_arr.ndim == 3:
+        result2 = np.transpose(input_arr, (0, 2, 1))
+    else:
+        result2 = np.transpose(input_arr)
     
     assert np.array_equal(result1, result2), "The results of the two transpose implementations do not match."
     print("Transpose matrix results match!")
@@ -48,18 +54,22 @@ def compare_masked_softmax(vector, mask):
     print("Masked softmax results match!")
 
 def compare_layer_norm(input_data):
-    result1 = utils.layer_norm.layer_norm(input_data)
+    temp = input_data
+    while isinstance(temp, list) and temp and isinstance(temp[0], list):
+        temp = temp[0]
+    
+    last_dim = len(temp)
+
+    gamma, beta = utils.layer_norm.init_layer_norm(last_dim)
+    result1 = utils.layer_norm.layer_norm(input_data, gamma, beta)
     result1 = np.array(result1)
 
     input_tensor = torch.tensor(input_data, dtype=torch.float32)
-
     normalized_shape = input_tensor.shape[-1]
-
     torch_ln = torch.nn.LayerNorm(normalized_shape)
 
     torch_ln.weight.data.fill_(1.0)
     torch_ln.bias.data.fill_(0.0)
-
     result2 = torch_ln(input_tensor).detach().numpy()
 
     assert np.allclose(result1, result2), "The results of the two layer_norm implementations do not match."
@@ -104,15 +114,22 @@ def compare_embeddings_layer(token_embeddings, positional_encodings):
     
     print("Embeddings layer results match!")
 
-def compare_linear_layer(input_vector, weight_matrix, bias_vector):
-    result1 = layers.linear_layer.linear_layer(input_vector, weight_matrix, bias_vector)
+def compare_linear_layer(input_tensor_3d, weight_matrix, bias_vector):
+    result1 = layers.linear_layer.linear_layer(input_tensor_3d, weight_matrix, bias_vector)
     result1 = np.array(result1)
 
-    input_tensor = torch.tensor(input_vector, dtype=torch.float32).unsqueeze(0)
-    weight_tensor = torch.tensor(weight_matrix, dtype=torch.float32)
-    bias_tensor = torch.tensor(bias_vector, dtype=torch.float32)
-    result2 = torch.matmul(input_tensor, weight_tensor) + bias_tensor
-    result2 = result2.squeeze(0).numpy()
+    in_dim = len(weight_matrix)
+    out_dim = len(bias_vector)
+    
+    input_t = torch.tensor(input_tensor_3d, dtype=torch.float32)
+    
+    torch_linear = torch.nn.Linear(in_dim, out_dim)
+    
+    torch_linear.weight.data = torch.tensor(np.array(weight_matrix).T, dtype=torch.float32)
+    torch_linear.bias.data = torch.tensor(bias_vector, dtype=torch.float32)
+    
+    result2_t = torch_linear(input_t)
+    result2 = result2_t.detach().numpy()
 
     assert np.allclose(result1, result2), "The results of the two linear_layer implementations do not match."
     print("Linear layer results match!")
@@ -121,12 +138,21 @@ def compare_scaled_dot_product_attention(queries, keys, values, mask=None):
     result1 = layers.scaled_dot_product_attention.scaled_dot_product_attention(queries, keys, values, mask)
     result1 = np.array(result1)
 
-    result2 = torch.nn.functional.scaled_dot_product_attention(
-        torch.tensor(queries, dtype=torch.float32),
-        torch.tensor(keys, dtype=torch.float32),
-        torch.tensor(values, dtype=torch.float32),
-        attn_mask=None if mask is None else torch.tensor(mask, dtype=torch.bool)
-    ).detach().numpy()
+    queries_t = torch.tensor(queries, dtype=torch.float32)
+    keys_t = torch.tensor(keys, dtype=torch.float32)
+    values_t = torch.tensor(values, dtype=torch.float32)
+    
+    d_k = keys_t.size(-1)
+    scores_t = torch.matmul(queries_t, keys_t.transpose(-2, -1)) / math.sqrt(d_k)
+
+    if mask is not None:
+        torch_mask = ~torch.tensor(mask, dtype=torch.bool)
+        scores_t = scores_t.masked_fill(torch_mask, -float('inf'))
+    
+    attention_weights_t = torch.nn.functional.softmax(scores_t, dim=-1)
+    
+    output_t = torch.matmul(attention_weights_t, values_t)
+    result2 = output_t.detach().numpy()
 
     assert np.allclose(result1, result2), "The results of the two scaled_dot_product_attention implementations do not match."
     print("Scaled dot-product attention results match!")
@@ -135,9 +161,11 @@ def compare_multi_head_attention(x, weights, mask=None):
     result1 = layers.multi_head_attention.multi_head_attention(x, weights, mask)
     result1 = np.array(result1)
 
-    qkv_weights, Wo, d_model, num_heads, d_head = weights
+    qkv_weights, (Wo, bo), d_model, num_heads, d_head = weights
+    
     x_t = torch.tensor(x, dtype=torch.float32)
     Wo_t = torch.tensor(Wo, dtype=torch.float32)
+    bo_t = torch.tensor(bo, dtype=torch.float32)
     
     torch_mask = None
     if mask is not None:
@@ -145,12 +173,14 @@ def compare_multi_head_attention(x, weights, mask=None):
     
     torch_head_outputs = []
     for h in range(num_heads):
-        Wq_h, Wk_h, Wv_h = qkv_weights[h]
-        Wq_h_t, Wk_h_t, Wv_h_t = map(lambda w: torch.tensor(w, dtype=torch.float32), (Wq_h, Wk_h, Wv_h))
+        (Wq_h, bq_h), (Wk_h, bk_h), (Wv_h, bv_h) = qkv_weights[h]
         
-        queries_h_t = torch.matmul(x_t, Wq_h_t)
-        keys_h_t = torch.matmul(x_t, Wk_h_t)
-        values_h_t = torch.matmul(x_t, Wv_h_t)
+        Wq_h_t, Wk_h_t, Wv_h_t = map(lambda w: torch.tensor(w, dtype=torch.float32), (Wq_h, Wk_h, Wv_h))
+        bq_h_t, bk_h_t, bv_h_t = map(lambda b: torch.tensor(b, dtype=torch.float32), (bq_h, bk_h, bv_h))
+        
+        queries_h_t = torch.matmul(x_t, Wq_h_t) + bq_h_t
+        keys_h_t = torch.matmul(x_t, Wk_h_t) + bk_h_t
+        values_h_t = torch.matmul(x_t, Wv_h_t) + bv_h_t
         
         d_k = queries_h_t.size(-1)
         scores = torch.matmul(queries_h_t, keys_h_t.transpose(-2, -1)) / np.sqrt(d_k)
@@ -162,7 +192,7 @@ def compare_multi_head_attention(x, weights, mask=None):
         torch_head_outputs.append(head_output)
 
     concatenated_t = torch.cat(torch_head_outputs, dim=-1)
-    output_t = torch.matmul(concatenated_t, Wo_t)
+    output_t = torch.matmul(concatenated_t, Wo_t) + bo_t
     result2 = output_t.numpy()
 
     assert np.allclose(result1, result2), "The results of the two multi_head_attention implementations do not match."
@@ -195,8 +225,12 @@ def compare_transformer_block(x, weights, mask=None):
     result1 = layers.transformer_block.transformer_block(x, weights, mask)
     result1 = np.array(result1)
 
-    mha_weights, ffn_weights = weights
-    qkv_weights, Wo, d_model, num_heads, d_head = mha_weights
+    mha_weights, ffn_weights, ln1_weights, ln2_weights = weights
+    
+    qkv_weights, (Wo, bo), d_model, num_heads, d_head = mha_weights
+    Wo_t = torch.tensor(Wo, dtype=torch.float32)
+    bo_t = torch.tensor(bo, dtype=torch.float32)
+
     (W1, b1), (W2, b2) = ffn_weights
     
     x_t = torch.tensor(x, dtype=torch.float32)
@@ -218,7 +252,6 @@ def compare_transformer_block(x, weights, mask=None):
     torch_ffn[0].bias.data = torch.tensor(b1, dtype=torch.float32)
     torch_ffn[2].weight.data = torch.tensor(np.array(W2).T, dtype=torch.float32)
     torch_ffn[2].bias.data = torch.tensor(b2, dtype=torch.float32)
-    
     torch_ffn.eval()
 
     normed_x_t = torch_ln1(x_t)
@@ -227,12 +260,14 @@ def compare_transformer_block(x, weights, mask=None):
     
     torch_head_outputs = []
     for h in range(num_heads):
-        Wq_h, Wk_h, Wv_h = qkv_weights[h]
-        Wq_h_t, Wk_h_t, Wv_h_t = map(lambda w: torch.tensor(w, dtype=torch.float32), (Wq_h, Wk_h, Wv_h))
+        (Wq_h, bq_h), (Wk_h, bk_h), (Wv_h, bv_h) = qkv_weights[h]
         
-        queries_h_t = torch.matmul(normed_x_t, Wq_h_t)
-        keys_h_t = torch.matmul(normed_x_t, Wk_h_t)
-        values_h_t = torch.matmul(normed_x_t, Wv_h_t)
+        Wq_h_t, Wk_h_t, Wv_h_t = map(lambda w: torch.tensor(w, dtype=torch.float32), (Wq_h, Wk_h, Wv_h))
+        bq_h_t, bk_h_t, bv_h_t = map(lambda b: torch.tensor(b, dtype=torch.float32), (bq_h, bk_h, bv_h))
+        
+        queries_h_t = torch.matmul(normed_x_t, Wq_h_t) + bq_h_t
+        keys_h_t = torch.matmul(normed_x_t, Wk_h_t) + bk_h_t
+        values_h_t = torch.matmul(normed_x_t, Wv_h_t) + bv_h_t
         
         d_k = queries_h_t.size(-1)
         scores = torch.matmul(queries_h_t, keys_h_t.transpose(-2, -1)) / np.sqrt(d_k)
@@ -243,17 +278,18 @@ def compare_transformer_block(x, weights, mask=None):
         torch_head_outputs.append(head_output)
 
     concatenated_t = torch.cat(torch_head_outputs, dim=-1)
-    attn_output_t = torch.matmul(concatenated_t, torch.tensor(Wo, dtype=torch.float32))
+    attn_output_t = torch.matmul(concatenated_t, Wo_t) + bo_t
     
     residual1_t = x_t + attn_output_t
     
     normed_residual1_t = torch_ln2(residual1_t)
+
     ffn_output_t = torch_ffn(normed_residual1_t)
-    result2_t = residual1_t + ffn_output_t
     
+    result2_t = residual1_t + ffn_output_t
     result2 = result2_t.detach().numpy()
 
-    assert np.allclose(result1, result2), "The results of the transformer_block implementations do not match."
+    assert np.allclose(result1, result2), "The results of the two transformer_block implementations do not match."
     print("Transformer block results match!")
 
 if __name__ == "__main__":
@@ -274,7 +310,6 @@ if __name__ == "__main__":
     
     attention_mask = [[True] * (i + 1) + [False] * (sequence_length - 1 - i) for i in range(sequence_length)]
 
-    # --- Initialize Weights ---
     weight_matrix, bias_vector = layers.linear_layer.init_random_linear(embedding_dim, embedding_dim)
     mha_weights_for_test = layers.multi_head_attention.init_multi_head_attention(d_model=embedding_dim, num_heads=num_heads)
     ffn_weights_for_test = layers.feed_forward.init_feed_forward(d_model=embedding_dim, d_ff=d_ff)
@@ -300,7 +335,7 @@ if __name__ == "__main__":
     compare_embeddings_layer(token_embeddings_val, positional_encodings)
     
     print("\n--- Testing Layers ---")
-    compare_linear_layer([0.5] * embedding_dim, weight_matrix, bias_vector)
+    compare_linear_layer(token_embeddings_val, weight_matrix, bias_vector)
     compare_scaled_dot_product_attention(token_embeddings_val, token_embeddings_val, token_embeddings_val, mask=attention_mask)
     compare_multi_head_attention(token_embeddings_val, mha_weights_for_test, mask=attention_mask)
     compare_feed_forward(token_embeddings_val, ffn_weights_for_test)
