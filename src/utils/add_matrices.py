@@ -1,8 +1,3 @@
-def add_vectors(vec1, vec2):
-    if len(vec1) != len(vec2):
-        raise ValueError("Vectors must have the same dimension to be added.")
-    return [v1 + v2 for v1, v2 in zip(vec1, vec2)]
-
 def add_matrices(m1, m2):
     if not isinstance(m1, list) or not isinstance(m2, list):
         return m1 + m2
