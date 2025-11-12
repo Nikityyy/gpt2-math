@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import src.utils as utils
 import src.embeddings as embeddings
+import src.layers as layers
 
 def compare_matmul(matrix1, matrix2):
     result1 = utils.matrix_multiply.matmul(matrix1, matrix2)
@@ -95,6 +96,19 @@ def compare_embeddings_layer(token_embeddings, positional_encodings):
     
     print("Embeddings layer results match!")
 
+def compare_linear_layer(input_vector, weight_matrix, bias_vector):
+    result1 = layers.linear_layer.linear_layer(input_vector, weight_matrix, bias_vector)
+    result1 = np.array(result1)
+
+    input_tensor = torch.tensor(input_vector, dtype=torch.float32).unsqueeze(0)
+    weight_tensor = torch.tensor(weight_matrix, dtype=torch.float32)
+    bias_tensor = torch.tensor(bias_vector, dtype=torch.float32)
+    result2 = torch.matmul(input_tensor, weight_tensor) + bias_tensor
+    result2 = result2.squeeze(0).numpy()
+
+    assert np.allclose(result1, result2), "The results of the two linear_layer implementations do not match."
+    print("Linear layer results match!")
+
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
             [4, 5, 6]]
@@ -121,6 +135,9 @@ if __name__ == "__main__":
     
     token_embeddings = embeddings.token_embeddings.token_embeddings_lookup(emb, batch_token_ids)
     positional_encodings = embeddings.positional_encoding.sinusoidal_positional_encoding(sequence_length, embedding_dim)
+    
+    weight_matrix, bias_vector = layers.linear_layer.init_random_linear(embedding_dim, embedding_dim)
+    vec_input = [0.5 for _ in range(embedding_dim)]
 
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat3, mat4)
@@ -131,3 +148,4 @@ if __name__ == "__main__":
     compare_token_embeddings_lookup(emb, batch_token_ids)
     compare_positional_encoding(sequence_length, embedding_dim)
     compare_embeddings_layer(token_embeddings, positional_encodings)
+    compare_linear_layer(vec_input, weight_matrix, bias_vector)
