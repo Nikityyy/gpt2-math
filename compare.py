@@ -4,6 +4,7 @@ import torch
 import src.utils as utils
 import src.embeddings as embeddings
 import src.layers as layers
+import src.model as model
 
 def compare_matmul(matrix1, matrix2):
     result1 = utils.matrix_multiply.matmul(matrix1, matrix2)
@@ -292,11 +293,84 @@ def compare_transformer_block(x, weights, mask=None):
     assert np.allclose(result1, result2), "The results of the two transformer_block implementations do not match."
     print("Transformer block results match!")
 
+def compare_gpt_decoder(x, weights, mask=None):
+    result1 = model.gpt_decoder.gpt_decoder(x, weights, mask)
+    result1 = np.array(result1)
+
+    block_weights_list, final_ln_weights = weights
+    num_layers = len(block_weights_list)
+    
+    _, _, d_model, num_heads, _ = block_weights_list[0][0]
+    
+    hidden_state_t = torch.tensor(x, dtype=torch.float32)
+    torch_mask = ~torch.tensor(mask, dtype=torch.bool) if mask is not None else None
+
+    for i in range(num_layers):
+        mha_weights, ffn_weights, ln1_weights, ln2_weights = block_weights_list[i]
+        qkv_weights, (Wo, bo), _, _, _ = mha_weights
+        (W1, b1), (W2, b2) = ffn_weights
+
+        torch_ln1 = torch.nn.LayerNorm(d_model)
+        torch_ln1.weight.data.fill_(1.0)
+        torch_ln1.bias.data.fill_(0.0)
+        normed_x_t = torch_ln1(hidden_state_t)
+        
+        torch_head_outputs = []
+        for h in range(num_heads):
+            (Wq_h, bq_h), (Wk_h, bk_h), (Wv_h, bv_h) = qkv_weights[h]
+            Wq_h_t, Wk_h_t, Wv_h_t = map(lambda w: torch.tensor(w, dtype=torch.float32), (Wq_h, Wk_h, Wv_h))
+            bq_h_t, bk_h_t, bv_h_t = map(lambda b: torch.tensor(b, dtype=torch.float32), (bq_h, bk_h, bv_h))
+            
+            queries_h_t = torch.matmul(normed_x_t, Wq_h_t) + bq_h_t
+            keys_h_t = torch.matmul(normed_x_t, Wk_h_t) + bk_h_t
+            values_h_t = torch.matmul(normed_x_t, Wv_h_t) + bv_h_t
+            
+            d_k = queries_h_t.size(-1)
+            scores = torch.matmul(queries_h_t, keys_h_t.transpose(-2, -1)) / np.sqrt(d_k)
+            if torch_mask is not None:
+                scores = scores.masked_fill(torch_mask, -float('inf'))
+            attention_weights = torch.nn.functional.softmax(scores, dim=-1)
+            head_output = torch.matmul(attention_weights, values_h_t)
+            torch_head_outputs.append(head_output)
+
+        concatenated_t = torch.cat(torch_head_outputs, dim=-1)
+        attn_output_t = torch.matmul(concatenated_t, torch.tensor(Wo, dtype=torch.float32)) + torch.tensor(bo, dtype=torch.float32)
+        
+        residual1_t = hidden_state_t + attn_output_t
+        
+        torch_ln2 = torch.nn.LayerNorm(d_model)
+        torch_ln2.weight.data.fill_(1.0)
+        torch_ln2.bias.data.fill_(0.0)
+        normed_residual1_t = torch_ln2(residual1_t)
+        
+        torch_ffn = torch.nn.Sequential(
+            torch.nn.Linear(d_model, len(W1[0])), torch.nn.GELU(approximate='tanh'), torch.nn.Linear(len(W2), len(W2[0]))
+        )
+        torch_ffn[0].weight.data = torch.tensor(np.array(W1).T, dtype=torch.float32)
+        torch_ffn[0].bias.data = torch.tensor(b1, dtype=torch.float32)
+        torch_ffn[2].weight.data = torch.tensor(np.array(W2).T, dtype=torch.float32)
+        torch_ffn[2].bias.data = torch.tensor(b2, dtype=torch.float32)
+        ffn_output_t = torch_ffn(normed_residual1_t)
+        
+        hidden_state_t = residual1_t + ffn_output_t
+
+    final_gamma, final_beta = final_ln_weights
+    torch_final_ln = torch.nn.LayerNorm(d_model)
+    torch_final_ln.weight.data = torch.tensor(final_gamma, dtype=torch.float32)
+    torch_final_ln.bias.data = torch.tensor(final_beta, dtype=torch.float32)
+    
+    result2_t = torch_final_ln(hidden_state_t)
+    result2 = result2_t.detach().numpy()
+
+    assert np.allclose(result1, result2), "The results of the gpt_decoder implementations do not match."
+    print("GPT decoder results match!")
+
 if __name__ == "__main__":
     vocab_size = 10
     batch_size = 2
     sequence_length = 3
     embedding_dim = 4
+    num_layers = 2
     num_heads = 2
     d_ff = embedding_dim * 4
 
@@ -320,6 +394,14 @@ if __name__ == "__main__":
     vec1 = [1.0, 2.0, 3.0, 4.0]
     mask_1d = [True, False, True, True]
     
+    block_weights_for_test = layers.transformer_block.init_transformer_block(embedding_dim, num_heads, d_ff)
+    
+    # Add new initialization for the decoder
+    decoder_weights_for_test = model.gpt_decoder.init_gpt_decoder(num_layers, embedding_dim, num_heads, d_ff)
+    
+    # Pre-compute embeddings for input to layers
+    embeddings_output = embeddings.embeddings_layer.embeddings_layer(token_embeddings_val, positional_encodings)
+    
     print("--- Testing Utils ---")
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat1, mat2)
@@ -342,3 +424,6 @@ if __name__ == "__main__":
     
     print("\n--- Testing Full Transformer Block ---")
     compare_transformer_block(token_embeddings_val, block_weights_for_test, mask=attention_mask)
+
+    print("\n--- Testing GPT Decoder ---")
+    compare_gpt_decoder(embeddings_output, decoder_weights_for_test, mask=attention_mask)
