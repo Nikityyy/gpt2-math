@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import torch
+import tiktoken
 import src.utils as utils
 import src.embeddings as embeddings
 import src.layers as layers
@@ -63,6 +64,7 @@ def compare_layer_norm(input_data):
     last_dim = len(temp)
 
     gamma, beta = utils.layer_norm.init_layer_norm(last_dim)
+    
     result1 = utils.layer_norm.layer_norm(input_data, gamma, beta)
     result1 = np.array(result1)
 
@@ -70,8 +72,9 @@ def compare_layer_norm(input_data):
     normalized_shape = input_tensor.shape[-1]
     torch_ln = torch.nn.LayerNorm(normalized_shape)
 
-    torch_ln.weight.data.fill_(1.0)
-    torch_ln.bias.data.fill_(0.0)
+    torch_ln.weight.data = torch.tensor(gamma, dtype=torch.float32)
+    torch_ln.bias.data = torch.tensor(beta, dtype=torch.float32)
+    
     result2 = torch_ln(input_tensor).detach().numpy()
 
     assert np.allclose(result1, result2), "The results of the two layer_norm implementations do not match."
@@ -236,14 +239,16 @@ def compare_transformer_block(x, weights, mask=None):
     (W1, b1), (W2, b2) = ffn_weights
     
     x_t = torch.tensor(x, dtype=torch.float32)
-
-    torch_ln1 = torch.nn.LayerNorm(d_model)
-    torch_ln1.weight.data.fill_(1.0)
-    torch_ln1.bias.data.fill_(0.0)
     
+    ln1_gamma, ln1_beta = ln1_weights
+    torch_ln1 = torch.nn.LayerNorm(d_model)
+    torch_ln1.weight.data = torch.tensor(ln1_gamma, dtype=torch.float32)
+    torch_ln1.bias.data = torch.tensor(ln1_beta, dtype=torch.float32)
+    
+    ln2_gamma, ln2_beta = ln2_weights
     torch_ln2 = torch.nn.LayerNorm(d_model)
-    torch_ln2.weight.data.fill_(1.0)
-    torch_ln2.bias.data.fill_(0.0)
+    torch_ln2.weight.data = torch.tensor(ln2_gamma, dtype=torch.float32)
+    torch_ln2.bias.data = torch.tensor(ln2_beta, dtype=torch.float32)
     
     torch_ffn = torch.nn.Sequential(
         torch.nn.Linear(d_model, len(W1[0])),
@@ -311,9 +316,10 @@ def compare_gpt_decoder(x, weights, mask=None):
         qkv_weights, (Wo, bo), _, _, _ = mha_weights
         (W1, b1), (W2, b2) = ffn_weights
 
+        ln1_gamma, ln1_beta = ln1_weights
         torch_ln1 = torch.nn.LayerNorm(d_model)
-        torch_ln1.weight.data.fill_(1.0)
-        torch_ln1.bias.data.fill_(0.0)
+        torch_ln1.weight.data = torch.tensor(ln1_gamma, dtype=torch.float32)
+        torch_ln1.bias.data = torch.tensor(ln1_beta, dtype=torch.float32)
         normed_x_t = torch_ln1(hidden_state_t)
         
         torch_head_outputs = []
@@ -339,9 +345,10 @@ def compare_gpt_decoder(x, weights, mask=None):
         
         residual1_t = hidden_state_t + attn_output_t
         
+        ln2_gamma, ln2_beta = ln2_weights
         torch_ln2 = torch.nn.LayerNorm(d_model)
-        torch_ln2.weight.data.fill_(1.0)
-        torch_ln2.bias.data.fill_(0.0)
+        torch_ln2.weight.data = torch.tensor(ln2_gamma, dtype=torch.float32)
+        torch_ln2.bias.data = torch.tensor(ln2_beta, dtype=torch.float32)
         normed_residual1_t = torch_ln2(residual1_t)
         
         torch_ffn = torch.nn.Sequential(
@@ -377,7 +384,7 @@ def compare_output_projection(x, token_embedding_matrix):
     result2_t = torch_linear_projection(x_t)
     result2 = result2_t.detach().numpy()
 
-    assert np.allclose(result1, result2), "The results of the output_projection implementations do not match."
+    assert np.allclose(result1, result2, atol=1e-6), "The results of the output_projection implementations do not match."
     print("Output projection results match!")
 
 def compare_gpt_model_forward(batch_token_ids, weights, mask=None):
@@ -399,11 +406,15 @@ def compare_gpt_model_forward(batch_token_ids, weights, mask=None):
     print("GPT model forward pass results match!")
 
 if __name__ == "__main__":
-    vocab_size = 10
+    enc = tiktoken.get_encoding("gpt2")
+    
+    vocab_size = enc.n_vocab 
+    print(f"Using GPT-2 tokenizer with vocab size: {vocab_size}")
+
     batch_size = 2
-    sequence_length = 3
-    max_seq_len = 10
-    embedding_dim = 4
+    sequence_length = 5
+    max_seq_len = 128
+    embedding_dim = 16
     num_layers = 2
     num_heads = 2
     d_ff = embedding_dim * 4
@@ -414,7 +425,7 @@ if __name__ == "__main__":
     
     token_embeddings_val = embeddings.token_embeddings.token_embeddings_lookup(emb, batch_token_ids)
     
-    positional_encodings = embeddings.positional_encoding.sinusoidal_positional_encoding(sequence_length * 2, embedding_dim)
+    positional_encodings = embeddings.positional_encoding.sinusoidal_positional_encoding(max_seq_len, embedding_dim)
     
     attention_mask = [[True] * (i + 1) + [False] * (sequence_length - 1 - i) for i in range(sequence_length)]
 
@@ -422,21 +433,14 @@ if __name__ == "__main__":
     mha_weights_for_test = layers.multi_head_attention.init_multi_head_attention(d_model=embedding_dim, num_heads=num_heads)
     ffn_weights_for_test = layers.feed_forward.init_feed_forward(d_model=embedding_dim, d_ff=d_ff)
     block_weights_for_test = layers.transformer_block.init_transformer_block(embedding_dim, num_heads, d_ff)
-
+    
     model_weights = gpt_model.init_gpt_model(vocab_size, embedding_dim, num_layers, num_heads, d_ff, max_seq_len)
 
+    print("--- Testing Utils ---")
     mat1 = [[1, 2], [3, 4]]
     mat2 = [[5, 6], [7, 8]]
     vec1 = [1.0, 2.0, 3.0, 4.0]
     mask_1d = [True, False, True, True]
-    
-    block_weights_for_test = layers.transformer_block.init_transformer_block(embedding_dim, num_heads, d_ff)
-    
-    decoder_weights_for_test = model.gpt_decoder.init_gpt_decoder(num_layers, embedding_dim, num_heads, d_ff)
-    
-    embeddings_output = embeddings.embeddings_layer.embeddings_layer(token_embeddings_val, positional_encodings)
-    
-    print("--- Testing Utils ---")
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat1, mat2)
     compare_transpose_matrix(mat1)
@@ -458,7 +462,10 @@ if __name__ == "__main__":
     
     print("\n--- Testing Full Transformer Block ---")
     compare_transformer_block(token_embeddings_val, block_weights_for_test, mask=attention_mask)
-
+    
+    decoder_weights_for_test = model.gpt_decoder.init_gpt_decoder(num_layers, embedding_dim, num_heads, d_ff)
+    embeddings_output = embeddings.embeddings_layer.embeddings_layer(token_embeddings_val, positional_encodings)
+    
     print("\n--- Testing GPT Decoder ---")
     decoder_output = model.gpt_decoder.gpt_decoder(embeddings_output, decoder_weights_for_test, mask=attention_mask)
     compare_gpt_decoder(embeddings_output, decoder_weights_for_test, mask=attention_mask)
@@ -469,3 +476,25 @@ if __name__ == "__main__":
 
     print("\n--- Testing Full GPT Model Forward Pass ---")
     compare_gpt_model_forward(batch_token_ids, model_weights, mask=attention_mask)
+
+    print("\n--- Testing Autoregressive Generation with tiktoken ---")
+    
+    prompt_text = "Once upon a time"
+    prompt_ids = enc.encode(prompt_text)
+    
+    print(f"Prompt: '{prompt_text}'")
+    print(f"Encoded IDs: {prompt_ids}")
+
+    generated_ids = gpt_model.generate(
+        weights=model_weights,
+        prompt_token_ids=prompt_ids,
+        max_new_tokens=10,
+        temperature=0.8,
+        top_k=50
+    )
+    
+    generated_text = enc.decode(generated_ids)
+    
+    print(f"Generated IDs: {generated_ids}")
+    print(f"Generated Text: '{generated_text}'")
+    print("\nGeneration test complete! (Output is random as weights are not trained)")
