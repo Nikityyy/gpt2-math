@@ -92,7 +92,7 @@ def compare_embeddings_layer(token_embeddings, positional_encodings):
     result2 = token_embeddings_t + pos_sliced_t
     
     assert result1.shape == result2.shape, f"Shape mismatch: {result1.shape} vs {result2.shape}"
-    assert np.allclose(result1, result2.numpy(), atol=1e-6), "The results of the two embeddings_layer implementations do not match."
+    assert np.allclose(result1, result2.numpy()), "The results of the two embeddings_layer implementations do not match."
     
     print("Embeddings layer results match!")
 
@@ -123,6 +123,33 @@ def compare_scaled_dot_product_attention(queries, keys, values, mask=None):
     assert np.allclose(result1, result2), "The results of the two scaled_dot_product_attention implementations do not match."
     print("Scaled dot-product attention results match!")
 
+def compare_multi_head_attention(x, weights, mask=None):
+    result1 = layers.multi_head_attention.multi_head_attention(x, weights, mask)
+    result1 = np.array(result1)
+
+    qkv_weights, Wo, d_model, num_heads, d_head = weights
+    x_t = torch.tensor(x, dtype=torch.float32)
+    Wo_t = torch.tensor(Wo, dtype=torch.float32)
+    
+    torch_head_outputs = []
+    for h in range(num_heads):
+        Wq_h, Wk_h, Wv_h = qkv_weights[h]
+        Wq_h_t, Wk_h_t, Wv_h_t = map(lambda w: torch.tensor(w, dtype=torch.float32), (Wq_h, Wk_h, Wv_h))
+        
+        queries_h_t = torch.matmul(x_t, Wq_h_t)
+        keys_h_t = torch.matmul(x_t, Wk_h_t)
+        values_h_t = torch.matmul(x_t, Wv_h_t)
+        
+        head_output = torch.nn.functional.scaled_dot_product_attention(queries_h_t, keys_h_t, values_h_t, attn_mask=None)
+        torch_head_outputs.append(head_output)
+
+    concatenated_t = torch.cat(torch_head_outputs, dim=-1)
+    output_t = torch.matmul(concatenated_t, Wo_t)
+    result2 = output_t.numpy()
+
+    assert np.allclose(result1, result2), "The results of the two multi_head_attention implementations do not match."
+    print("Multi-head attention results match!")
+
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
             [4, 5, 6]]
@@ -152,6 +179,7 @@ if __name__ == "__main__":
     
     weight_matrix, bias_vector = layers.linear_layer.init_random_linear(embedding_dim, embedding_dim)
     vec_input = [0.5 for _ in range(embedding_dim)]
+    weights = layers.multi_head_attention.init_multi_head_attention(d_model=embedding_dim, num_heads=2)
 
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat3, mat4)
@@ -164,3 +192,4 @@ if __name__ == "__main__":
     compare_embeddings_layer(token_embeddings, positional_encodings)
     compare_linear_layer(vec_input, weight_matrix, bias_vector)
     compare_scaled_dot_product_attention(token_embeddings, token_embeddings, token_embeddings)
+    compare_multi_head_attention(token_embeddings, weights)
