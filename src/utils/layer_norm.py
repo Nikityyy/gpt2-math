@@ -7,7 +7,8 @@ def _layer_norm_1d(x, gamma, beta, epsilon=1e-5):
     if not x: return []
     mean = sum(x) / len(x)
     variance = sum((xi - mean) ** 2 for xi in x) / len(x)
-    return [((xi - mean) / (variance + epsilon) ** 0.5) * g + b for xi, g, b in zip(x, gamma, beta)]
+    denom = (variance + epsilon) ** 0.5
+    return [((xi - mean) / denom) * g + b for xi, g, b in zip(x, gamma, beta)]
 
 def layer_norm(tensor, gamma, beta, epsilon=1e-5):
     if tensor and isinstance(tensor[0], list):
